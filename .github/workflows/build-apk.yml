@@ -17,38 +17,25 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Locate project and build APK
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Debug APK
         run: |
-          # 1. Locate the folder with settings.gradle or build.gradle
-          SETTINGS_FILE=$(find . -name "settings.gradle*" | head -n 1)
-          if [ -n "$SETTINGS_FILE" ]; then
-            PROJECT_DIR=$(dirname "$SETTINGS_FILE")
-          else
-            BUILD_FILE=$(find . -name "build.gradle*" | head -n 1)
-            PROJECT_DIR=$(dirname "$BUILD_FILE")
-          fi
-
-          echo "Target project directory: $PROJECT_DIR"
-          cd "$PROJECT_DIR"
-
-          # 2. Tell Gradle where the Android SDK lives
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-          # 3. Accept all Android SDK licenses
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-          # 4. Run the build with clean summary output
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --no-daemon
-          else
-            sudo apt-get update && sudo apt-get install -y gradle
-            gradle assembleDebug --no-daemon
+          # If the wrapper script is missing, generate modern wrapper 8.5
+          if [ ! -f "./gradlew" ]; then
+            gradle wrapper --gradle-version 8.5
           fi
+          chmod +x ./gradlew
+
+          # Run the build specifically on the app module
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: IndieVLC-debug-apk
-          path: "**/build/outputs/apk/debug/*.apk"
+          path: app/build/outputs/apk/debug/*.apk
           
