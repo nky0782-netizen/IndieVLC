@@ -1,100 +1,124 @@
 package com.indievlc.player
 
 import android.content.Intent
-import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
-import android.view.Gravity
-import android.view.ViewGroup
+import android.os.Handler
+import android.os.Looper
 import android.widget.Button
-import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
-import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 
-class MainActivity : ComponentActivity() {
-    private var libVlc: LibVLC? = null
-    private var mediaPlayer: MediaPlayer? = null
-    private lateinit var videoLayout: VLCVideoLayout
-    private lateinit var status: TextView
+class MainActivity : AppCompatActivity() {
 
-    private val pickVideo = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        uri?.let { playVideo(it) }
+    private lateinit var libVLC: LibVLC
+    private lateinit var mediaPlayer: MediaPlayer
+    private lateinit var videoLayout: VLCVideoLayout
+    private lateinit var btnPlayPause: Button
+    private lateinit var seekBar: SeekBar
+    private lateinit var timeDisplay: TextView
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var isTrackingTouch = false
+
+    private val openDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        uri?.let {
+            contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            playMedia(it)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = Color.rgb(5, 5, 5)
-        window.navigationBarColor = Color.rgb(5, 5, 5)
+        setContentView(R.layout.activity_main)
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 28, 24, 24)
-            setBackgroundColor(Color.rgb(5, 5, 5))
+        videoLayout = findViewById(R.id.video_layout)
+        btnPlayPause = findViewById(R.id.btn_play_pause)
+        seekBar = findViewById(R.id.seek_bar)
+        timeDisplay = findViewById(R.id.time_display)
+
+        val args = ArrayList<String>().apply {
+            add("--aout=opensles")
+            add("--audio-time-stretch")
+            add("-vvv")
         }
-        val brand = TextView(this).apply {
-            text = "IndieVLC"
-            textSize = 30f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER_VERTICAL
+        libVLC = LibVLC(this, args)
+        mediaPlayer = MediaPlayer(libVLC)
+
+        findViewById<Button>(R.id.btn_choose).setOnClickListener {
+            openDocument.launch(arrayOf("video/*"))
         }
-        val subtitle = TextView(this).apply {
-            text = "Play everything. Your way."
-            textSize = 14f
-            setTextColor(Color.LTGRAY)
-            setPadding(0, 4, 0, 18)
+
+        btnPlayPause.setOnClickListener {
+            if (mediaPlayer.isPlaying) {
+                mediaPlayer.pause()
+                btnPlayPause.text = "Play"
+            } else {
+                mediaPlayer.play()
+                btnPlayPause.text = "Pause"
+            }
         }
-        videoLayout = VLCVideoLayout(this)
-        videoLayout.setBackgroundColor(Color.BLACK)
-        status = TextView(this).apply {
-            text = "Your player is ready. Choose a video to begin."
-            textSize = 14f
-            setTextColor(Color.LTGRAY)
-            setPadding(0, 16, 0, 16)
-        }
-        val open = Button(this).apply {
-            text = "Choose a video"
-            setOnClickListener { pickVideo.launch(arrayOf("video/*", "audio/*")) }
-        }
-        root.addView(brand)
-        root.addView(subtitle)
-        root.addView(videoLayout, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        root.addView(status)
-        root.addView(open)
-        setContentView(root)
+
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser && mediaPlayer.length > 0) {
+                    val position = progress.toFloat() / 1000f
+                    mediaPlayer.position = position
+                }
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) { isTrackingTouch = true }
+            override fun onStopTrackingTouch(sb: SeekBar?) { isTrackingTouch = false }
+        })
+
+        // Polling loop to update seekbar progress
+        handler.post(object : Runnable {
+            override fun run() {
+                if (mediaPlayer.isPlaying && !isTrackingTouch) {
+                    val progress = (mediaPlayer.position * 1000).toInt()
+                    seekBar.progress = progress
+                    val current = formatTime(mediaPlayer.time)
+                    val total = formatTime(mediaPlayer.length)
+                    timeDisplay.text = "$current / $total"
+                }
+                handler.postDelayed(this, 1000)
+            }
+        })
     }
 
-    private fun playVideo(uri: Uri) {
-        try {
-            if (libVlc == null) libVlc = LibVLC(this, arrayListOf("--no-drop-late-frames", "--no-skip-frames"))
-            if (mediaPlayer == null) {
-                mediaPlayer = MediaPlayer(libVlc!!).also { it.attachViews(videoLayout, null, false, false) }
-            }
-            val media = Media(libVlc!!, uri).apply { setHWDecoderEnabled(true, false) }
-            mediaPlayer?.media = media
-            media.release()
-            mediaPlayer?.play()
-            status.text = "Playing selected media"
-        } catch (e: Exception) {
-            status.text = "Couldn't open this file: ${e.localizedMessage ?: "unknown error"}"
+    private fun playMedia(uri: Uri) {
+        val media = Media(libVLC, uri).apply {
+            setHWDecoderEnabled(true, false)
         }
+        mediaPlayer.media = media
+        media.release()
+
+        mediaPlayer.attachViews(videoLayout, null, false, false)
+        mediaPlayer.play()
+        btnPlayPause.text = "Pause"
+    }
+
+    private fun formatTime(millis: Long): String {
+        val totalSeconds = (millis / 1000).coerceAtLeast(0)
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return String.format("%02d:%02d", minutes, seconds)
     }
 
     override fun onStop() {
-        mediaPlayer?.pause()
         super.onStop()
+        mediaPlayer.stop()
+        mediaPlayer.detachViews()
     }
 
     override fun onDestroy() {
-        mediaPlayer?.detachViews()
-        mediaPlayer?.release()
-        mediaPlayer = null
-        libVlc?.release()
-        libVlc = null
         super.onDestroy()
+        mediaPlayer.release()
+        libVLC.release()
     }
 }
