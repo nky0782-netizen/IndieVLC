@@ -19,23 +19,31 @@ jobs:
 
       - name: Locate project and build APK
         run: |
-          BUILD_FILE=$(find . -name "build.gradle*" | head -n 1)
-          if [ -z "$BUILD_FILE" ]; then
-            echo "Error: No build.gradle file found in repository"
-            exit 1
+          # 1. Locate the folder with settings.gradle or build.gradle
+          SETTINGS_FILE=$(find . -name "settings.gradle*" | head -n 1)
+          if [ -n "$SETTINGS_FILE" ]; then
+            PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+          else
+            BUILD_FILE=$(find . -name "build.gradle*" | head -n 1)
+            PROJECT_DIR=$(dirname "$BUILD_FILE")
           fi
 
-          PROJECT_DIR=$(dirname "$BUILD_FILE")
-          echo "Found project directory: $PROJECT_DIR"
+          echo "Target project directory: $PROJECT_DIR"
           cd "$PROJECT_DIR"
 
-          # Use gradlew if present, otherwise build using installed gradle
+          # 2. Tell Gradle where the Android SDK lives
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+          # 3. Accept all Android SDK licenses
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+          # 4. Run the build with clean summary output
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            ./gradlew assembleDebug --no-daemon
           else
             sudo apt-get update && sudo apt-get install -y gradle
-            gradle assembleDebug --no-daemon --stacktrace
+            gradle assembleDebug --no-daemon
           fi
 
       - name: Upload Debug APK
