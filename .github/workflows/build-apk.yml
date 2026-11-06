@@ -20,20 +20,23 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Align JVM targets and Build APK
+      - name: Enforce Java 17 Toolchain and Build APK
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-          # 1. Ensure Gradle 8.9 wrapper is generated
+          # 1. Ensure wrapper matches version 8.9
           gradle wrapper --gradle-version 8.9
           chmod +x ./gradlew
 
-          # 2. Patch JavaVersion.VERSION_1_8 to VERSION_17 in app/build.gradle.kts
-          sed -i 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' app/build.gradle.kts
-          sed -i 's/jvmTarget = "1.8"/jvmTarget = "17"/g' app/build.gradle.kts
-          sed -i 's/jvmTarget = "8"/jvmTarget = "17"/g' app/build.gradle.kts
+          # 2. Append toolchain configuration to force both Java and Kotlin to JDK 17
+          cat << 'EOF' >> app/build.gradle.kts
 
-          # 3. Compile the debug APK
+          kotlin {
+              jvmToolchain(17)
+          }
+          EOF
+
+          # 3. Build the debug APK
           ./gradlew :app:assembleDebug --no-daemon
 
       - name: Upload Debug APK
