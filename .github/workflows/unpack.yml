@@ -30,6 +30,7 @@ jobs:
           fi
 
           cp -a "$project_dir"/. .
+          rm -f .github/workflows/build-apk.yml
           rm -rf unpacked
           rm -f ./*.zip
 
